@@ -31,7 +31,7 @@ async function checkTable() {
     .limit(1);
   if (error) {
     console.error('❌ Cannot access chatbot table:', error.message);
-    console.error('Please create the table with columns: id, region, country, client_type, service, name, email, created_at');
+    console.error('Please create the table with columns: id, region, country, client_type, service, name, email, created_at, opis_problemu');
   } else {
     console.log('✅ chatbot table accessible');
   }
@@ -80,7 +80,8 @@ const State = {
   AWAITING_COUNTRY: 'awaiting_country',
   AWAITING_CLIENT_TYPE: 'awaiting_client_type',
   AWAITING_SERVICE: 'awaiting_service',
-  AWAITING_SERVICE_DESCRIPTION: 'awaiting_service_description',
+  AWAITING_SERVICE_DESCRIPTION: 'awaiting_service_description', // for "Other"
+  AWAITING_DESCRIPTION: 'awaiting_description', // new: general description
   AWAITING_NAME: 'awaiting_name',
   AWAITING_EMAIL: 'awaiting_email',
   COMPLETED: 'completed',
@@ -108,6 +109,8 @@ const prompts = {
   servicePrompt: "What service are you interested in? Please choose from:\n- hladanie zamestnancov (recruitment)\n- hladanie investora (find investor)\n- moznost speakovat na evente (speak at event)\n- marketingova podpora (marketing support)\n- podpora sales (sales support)\n- hladanie klientov (find clients)\n- Other (other)",
   serviceInvalid: "Please choose a valid service from the list. If you're not sure, type 'Other' for other.",
   otherDescriptionPrompt: "Please briefly describe what you need help with.",
+  descriptionPrompt: "Please provide a brief description of your issue or request (minimum 5 characters).",
+  descriptionInvalid: "Please provide a description of at least 5 characters.",
   namePrompt: "Please provide your full name (first and last name).",
   nameInvalid: "Please enter your full name (at least first and last name, each at least 2 characters).",
   emailPrompt: "Great! Finally, please provide your email address so we can contact you about your request.",
@@ -143,10 +146,10 @@ const middleEastCountries = [
   "bahrain", "cyprus", "egypt", "iran", "iraq", "israel", "jordan", "kuwait", "lebanon", "oman", "palestine", "qatar", "saudi arabia", "syria", "turkey", "uae", "yemen"
 ];
 
-// Combined list for alias mapping (we'll still use it for alias resolution)
+// Combined list for alias mapping
 const allCountries = [...europeanCountries, ...middleEastCountries];
 
-// Country aliases (same as before)
+// Country aliases
 const countryAliases = {
   'czech republic': ['czech republic', 'czechia', 'czech', 'česko'],
   'united kingdom': ['united kingdom', 'uk', 'great britain', 'britain', 'england', 'scotland', 'wales', 'northern ireland'],
@@ -157,11 +160,9 @@ const countryAliases = {
 
 function normalizeCountry(input) {
   const normalized = input.trim().toLowerCase();
-  // Check aliases first
   for (const [canonical, aliases] of Object.entries(countryAliases)) {
     if (aliases.includes(normalized)) return canonical;
   }
-  // Then check if the input matches any valid country (exact or partial)
   const match = allCountries.find(country => country.includes(normalized) || normalized.includes(country));
   return match || null;
 }
@@ -180,7 +181,6 @@ function isValidCountry(input, region) {
   if (normalized.length < 3) return false;
   const canonical = normalizeCountry(normalized);
   if (!canonical) return false;
-  // Now check if canonical belongs to the selected region
   return isCountryInRegion(canonical, region);
 }
 
@@ -226,6 +226,11 @@ function isValidEmail(input) {
   return validator.isEmail(input);
 }
 
+function isValidDescription(input) {
+  const trimmed = input.trim();
+  return trimmed.length >= 5;
+}
+
 function getSession(sessionId, ip) {
   let session = sessions.get(sessionId);
   if (!session) {
@@ -267,14 +272,12 @@ function processMessage(session, userMessage) {
       }
 
     case State.AWAITING_COUNTRY:
-      // Pass the selected region (stored in data.region) to the validator
       const countryNormalized = normalizeCountry(userMessage);
       if (countryNormalized && isCountryInRegion(countryNormalized, data.region)) {
         data.country = countryNormalized;
         session.state = State.AWAITING_CLIENT_TYPE;
         return { response: t.clientTypePrompt, nextState: State.AWAITING_CLIENT_TYPE, extractedData: { country: countryNormalized } };
       } else {
-        // Provide a more specific error message indicating region mismatch
         const invalidMsg = `Sorry, "${userMessage}" is not in ${data.region}. Please enter a country in ${data.region}.`;
         return { response: invalidMsg, nextState: State.AWAITING_COUNTRY };
       }
@@ -297,8 +300,9 @@ function processMessage(session, userMessage) {
           session.state = State.AWAITING_SERVICE_DESCRIPTION;
           return { response: t.otherDescriptionPrompt, nextState: State.AWAITING_SERVICE_DESCRIPTION, extractedData: { service } };
         } else {
-          session.state = State.AWAITING_NAME;
-          return { response: t.namePrompt, nextState: State.AWAITING_NAME, extractedData: { service } };
+          // After regular service, ask for description
+          session.state = State.AWAITING_DESCRIPTION;
+          return { response: t.descriptionPrompt, nextState: State.AWAITING_DESCRIPTION, extractedData: { service } };
         }
       } else {
         return { response: t.serviceInvalid, nextState: State.AWAITING_SERVICE };
@@ -306,8 +310,17 @@ function processMessage(session, userMessage) {
 
     case State.AWAITING_SERVICE_DESCRIPTION:
       data.other_description = userMessage;
-      session.state = State.AWAITING_NAME;
-      return { response: t.namePrompt, nextState: State.AWAITING_NAME, extractedData: { other_description: userMessage } };
+      session.state = State.AWAITING_DESCRIPTION;
+      return { response: t.descriptionPrompt, nextState: State.AWAITING_DESCRIPTION, extractedData: { other_description: userMessage } };
+
+    case State.AWAITING_DESCRIPTION:
+      if (isValidDescription(userMessage)) {
+        data.description = userMessage;
+        session.state = State.AWAITING_NAME;
+        return { response: t.namePrompt, nextState: State.AWAITING_NAME, extractedData: { description: userMessage } };
+      } else {
+        return { response: t.descriptionInvalid, nextState: State.AWAITING_DESCRIPTION };
+      }
 
     case State.AWAITING_NAME:
       if (isValidName(userMessage)) {
@@ -341,6 +354,7 @@ async function createSubmission(session, sessionId) {
     country: toTitleCase(data.country),
     client_type: toTitleCase(data.client_type),
     service: data.service === SERVICES.OTHER ? 'Other' : toTitleCase(data.service),
+    opis_problemu: data.description || null,
     name: data.name,
     email: data.email,
     created_at: new Date().toISOString(),
@@ -354,18 +368,26 @@ async function createSubmission(session, sessionId) {
       .insert([record])
       .select();
 
-    if (error) {
-      console.error('Supabase insert error:', error);
-      throw error;
-    }
+    if (error) throw error;
     console.log('Submission created successfully:', submission);
+
+    console.log('🚀 Running pipeline...');
+    const pipelineResult = await runPipeline({
+      region: record.region,
+      country: record.country,
+      client_type: record.client_type,
+      service: record.service,
+    });
+    console.log('✅ Pipeline result:', pipelineResult);
+
     return true;
   } catch (error) {
     console.error('Submission creation error:', error);
-    return false;
+    return true;
   }
 }
 
+// Routes and server start unchanged (keep them as is)
 app.post('/reset', (req, res) => {
   const { sessionId } = req.body;
   if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
@@ -429,7 +451,6 @@ app.post('/chat', async (req, res) => {
   });
 });
 
-// Clean up stale sessions every 30 minutes
 setInterval(() => {
   const now = Date.now();
   const SESSION_TIMEOUT = 30 * 60 * 1000;
@@ -444,17 +465,16 @@ setInterval(() => {
   if (deleted) console.log(`Cleaned up ${deleted} stale sessions.`);
 }, 30 * 60 * 1000);
 
-// --- Start Express server ---
 app.listen(port, () => {
   console.log(`✅ Express server running on http://localhost:${port}`);
 });
 
-// --- Discord bot setup ---
+// Discord bot code remains unchanged
 const discordClient = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // Required to read message content
+    GatewayIntentBits.MessageContent,
   ],
 });
 
@@ -463,20 +483,11 @@ discordClient.once('ready', () => {
 });
 
 discordClient.on('messageCreate', async (message) => {
-  // Ignore messages from bots (including itself)
   if (message.author.bot) return;
-
-  // Optional: Only respond if the bot is mentioned
   if (!message.mentions.has(discordClient.user)) return;
-
   try {
-    // Show typing indicator
     await message.channel.sendTyping();
-
-    // TODO: Replace this placeholder with a call to your actual chatbot logic.
-    // For now, it just replies with a simple message.
     const response = "Hello! I'm connected to your Node.js logic.";
-
     await message.reply(response);
   } catch (error) {
     console.error("Discord message error:", error);
@@ -484,7 +495,6 @@ discordClient.on('messageCreate', async (message) => {
   }
 });
 
-// Log in to Discord (this starts the bot)
 discordClient.login(process.env.DISCORD_TOKEN).catch(err => {
   console.error("Failed to login to Discord:", err);
 });

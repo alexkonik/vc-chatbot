@@ -51,6 +51,8 @@ async function resetNepriradene() {
 }
 
 // ─── KROK 1: Chatbot dáta → Ticket ────────────────────────────────────────────
+// FIX: name, email, opis_problemu are now passed in and written directly —
+//      no longer dependent on the backfill step to fill them in later.
 async function chatbotToTicket(vstup) {
     const { region, country, client_type, service, name, email, opis_problemu } = vstup;
 
@@ -78,58 +80,8 @@ async function chatbotToTicket(vstup) {
 
     if (error) throw new Error(`Chyba pri zápise ticketu: ${error.message}`);
 
-    console.log(`✅ Ticket ${ticketCode} vytvorený (Meno: ${name}, Email: ${email}).`);
+    console.log(`✅ Ticket ${ticketCode} vytvorený (Meno: ${name}, Email: ${email}, Opis: ${opis_problemu}).`);
     return ticketCode;
-}
-
-// ─── KROK 2b: Doplň chýbajúce údaje do existujúcich ticketov ──────────────────
-async function doplnUdajeDoTicketov() {
-    const { data: tickety, error: tErr } = await getSupabase()
-        .from("tickets")
-        .select("ticket_code, Meno, email, opis_problemu")
-        .or("Meno.is.null,email.is.null,opis_problemu.is.null");
-
-    if (tErr || !tickety?.length) return;
-
-    console.log(`🔄 Doplňujem údaje pre ${tickety.length} ticketov...`);
-
-    const { data: chatboty, error: cErr } = await getSupabase()
-        .from("chatbot")
-        .select("name, email, service, region, country, client_type, opis_problemu")
-        .eq("status", "vybavene");
-
-    if (cErr || !chatboty?.length) return;
-
-    for (const ticket of tickety) {
-        const kod = ticket.ticket_code;
-
-        for (const cb of chatboty) {
-            const regionId  = await getId("regions",            "name",  "id",            cb.region);
-            const countryId = await getId("countries",          "name",  "country_index", cb.country);
-            const reqCat    = await getId("request_categories", "label", "id",            cb.service);
-            const userType  = await getId("user_types",         "label", "id",            cb.client_type);
-
-            if (!regionId || !countryId || !reqCat || !userType) continue;
-
-            const vypocitanyKod = `${regionId}${countryId}${reqCat}${userType}`;
-
-            if (vypocitanyKod === kod) {
-                const { error: uErr } = await getSupabase()
-                    .from("tickets")
-                    .update({
-                        Meno:          cb.name          || ticket.Meno,
-                        email:         cb.email         || ticket.email,
-                        opis_problemu: cb.opis_problemu || ticket.opis_problemu,
-                    })
-                    .eq("ticket_code", kod);
-
-                if (!uErr) {
-                    console.log(`📝 Doplnené pre ${kod}: ${cb.name} | ${cb.email} | ${cb.opis_problemu}`);
-                }
-                break;
-            }
-        }
-    }
 }
 
 // ─── KROK 2: Načítaj najstarší open ticket ─────────────────────────────────────
@@ -238,8 +190,8 @@ async function runPipeline(vstup) {
     console.log("═══════════════════════════════════════");
 
     await resetNepriradene();
-    await doplnUdajeDoTicketov();
 
+    // FIX: create the ticket first (with all data), then pick it up and assign
     if (vstup) {
         await chatbotToTicket(vstup);
     }

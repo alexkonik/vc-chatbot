@@ -1,8 +1,12 @@
 require('dotenv').config();
+const { runPipeline } = require('./pipeline');
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const validator = require('validator');
+
+// --- Discord imports ---
+const { Client, GatewayIntentBits } = require('discord.js');
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
   console.error('Missing required environment variables. Check .env file.');
@@ -440,6 +444,47 @@ setInterval(() => {
   if (deleted) console.log(`Cleaned up ${deleted} stale sessions.`);
 }, 30 * 60 * 1000);
 
+// --- Start Express server ---
 app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+  console.log(`✅ Express server running on http://localhost:${port}`);
+});
+
+// --- Discord bot setup ---
+const discordClient = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent, // Required to read message content
+  ],
+});
+
+discordClient.once('ready', () => {
+  console.log(`✅ Discord bot logged in as ${discordClient.user.tag}`);
+});
+
+discordClient.on('messageCreate', async (message) => {
+  // Ignore messages from bots (including itself)
+  if (message.author.bot) return;
+
+  // Optional: Only respond if the bot is mentioned
+  if (!message.mentions.has(discordClient.user)) return;
+
+  try {
+    // Show typing indicator
+    await message.channel.sendTyping();
+
+    // TODO: Replace this placeholder with a call to your actual chatbot logic.
+    // For now, it just replies with a simple message.
+    const response = "Hello! I'm connected to your Node.js logic.";
+
+    await message.reply(response);
+  } catch (error) {
+    console.error("Discord message error:", error);
+    await message.reply("Internal error. Check the console!");
+  }
+});
+
+// Log in to Discord (this starts the bot)
+discordClient.login(process.env.DISCORD_TOKEN).catch(err => {
+  console.error("Failed to login to Discord:", err);
 });

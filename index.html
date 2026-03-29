@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="sk">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -502,7 +502,7 @@
         });
 
         // --- Chat functionality (same as test.html) ---
-        const BACKEND_URL = 'https://vc-chatbot-445k.onrender.com'; // <-- UPDATE TO YOUR RENDER URL
+        const BACKEND_URL = 'https://vc-chatbot.onrender.com'; // <-- UPDATE TO YOUR RENDER URL
 
         let sessionId = localStorage.getItem('chatSessionId');
         if (!sessionId) {
@@ -579,9 +579,10 @@
             sessionId = crypto.randomUUID();
             localStorage.setItem('chatSessionId', sessionId);
             chatMessages.innerHTML = '';
-            addMessage('bot', 'Konverzácia bola resetovaná. Ako vám môžem pomôcť?');
+            // Do NOT add a pre‑filled message; the user must type something to start.
             sendBtn.disabled = false;
             chatInput.disabled = false;
+            addMessage('system', 'Nová konverzácia. Napíšte správu pre spustenie.', true);
         }
 
         sendBtn.addEventListener('click', sendMessage);
@@ -597,9 +598,9 @@
                 btn.addEventListener('click', (e) => {
                     e.preventDefault();
                     modal.style.display = 'flex';
-                    // Preload messages if empty
+                    // Optionally show a welcome instruction, but no bot message yet.
                     if (chatMessages.children.length === 0) {
-                        addMessage('bot', 'Dobrý deň! Som podporný chatbot. Pre lepšiu pomoc mi prosím povedzte váš región – Európa alebo Blízky východ?');
+                        addMessage('system', 'Welcome! Please type a message to start the conversation.', true);
                     }
                 });
             }

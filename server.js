@@ -345,6 +345,7 @@ function processMessage(session, userMessage) {
   }
 }
 
+// Updated createSubmission with detailed error logging and returning false on failure
 async function createSubmission(session, sessionId) {
   const data = session.collectedData;
   console.log('createSubmission called with data:', JSON.stringify(data, null, 2));
@@ -368,8 +369,12 @@ async function createSubmission(session, sessionId) {
       .insert([record])
       .select();
 
-    if (error) throw error;
-    console.log('Submission created successfully:', submission);
+    if (error) {
+      console.error('❌ Supabase insert error:', JSON.stringify(error, null, 2));
+      console.error('Error details:', error.message, error.details, error.hint, error.code);
+      return false;
+    }
+    console.log('✅ Submission created successfully:', submission);
 
     console.log('🚀 Running pipeline...');
     const pipelineResult = await runPipeline({
@@ -382,12 +387,13 @@ async function createSubmission(session, sessionId) {
 
     return true;
   } catch (error) {
-    console.error('Submission creation error:', error);
-    return true;
+    console.error('❌ Submission creation error:', JSON.stringify(error, null, 2));
+    console.error('Error details:', error.message, error.details, error.hint, error.code);
+    return false;
   }
 }
 
-// Routes and server start unchanged (keep them as is)
+// Routes
 app.post('/reset', (req, res) => {
   const { sessionId } = req.body;
   if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
@@ -469,7 +475,7 @@ app.listen(port, () => {
   console.log(`✅ Express server running on http://localhost:${port}`);
 });
 
-// Discord bot code remains unchanged
+// Discord bot setup (unchanged)
 const discordClient = new Client({
   intents: [
     GatewayIntentBits.Guilds,

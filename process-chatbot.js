@@ -38,7 +38,7 @@ async function processNewChatbotEntries() {
       // Mark as processed
       await supabase
         .from('chatbot')
-        .update({ status: 'processed' })
+        .update({ status: 'vybavene' })
         .eq('id', entry.id);
     } catch (err) {
       console.error(`Failed to process entry ${entry.id}:`, err);
